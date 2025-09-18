@@ -8,7 +8,6 @@
 - Attacker Machine: Kali Linux 2025.2 (amd64)
 - Victim Machine: Ubuntu Desktop 24.04.3 (amd64)
 - Log Analysis: ELK Stack (Elasticsearch, Logstash, Kibana)
-- Duration: 1 Week (7 Sessions)
 
 ---
 
