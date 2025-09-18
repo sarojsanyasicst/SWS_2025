@@ -39,34 +39,21 @@ Use **Internal Network** configuration to prevent:
 
 #### Step 1: Network Configuration
 
-1. **Create Internal Network in VirtualBox:**
+1. **Configure Kali Linux VM:**
 
-   ```
-   VirtualBox → File → Preferences → Network → Host-only Networks → Create
-   Name: CyberSecLab
-   IPv4 Address: 192.168.100.1
-   IPv4 Network Mask: 255.255.255.0
-   ```
+   - Settings → Network → Adapter 1 → NAT
 
-2. **Configure Kali Linux VM:**
-
-   - Settings → Network → Adapter 1 → Host-only Adapter
-   - Name: CyberSecLab
-   - Static IP: 192.168.100.10
-
-3. **Configure Ubuntu VM:**
-   - Settings → Network → Adapter 1 → Host-only Adapter
-   - Name: CyberSecLab
-   - Static IP: 192.168.100.20
+2. **Configure Ubuntu VM:**
+   - Settings → Network → Adapter 1 → NAT
 
 #### Step 2: Verify Connectivity
 
 ```bash
 # From Kali Linux
-ping 192.168.100.20
+ping [Ubuntu ip]
 
 # From Ubuntu
-ping 192.168.100.10
+ping [kali ip]
 ```
 
 ### Assessment Checkpoint 1
