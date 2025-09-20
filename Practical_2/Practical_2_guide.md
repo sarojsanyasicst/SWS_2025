@@ -11,7 +11,7 @@
 
 ---
 
-## Session 1: Lab Setup & Network Configuration
+## 1: Lab Setup & Network Configuration
 
 ### Learning Objectives
 
@@ -64,7 +64,7 @@ ping [kali ip]
 
 ---
 
-## Session 2: Linux Services & Daemons Deep Dive
+## 2: Linux Services & Daemons Deep Dive
 
 ### Learning Objectives
 
@@ -103,8 +103,9 @@ systemctl list-units --type=service --state=active
 
 # Check service status
 systemctl status ssh
-systemctl status apache2
-systemctl status mysql
+
+#systemctl status apache2
+#systemctl status mysql
 
 # View service dependencies
 systemctl list-dependencies ssh.service
@@ -119,15 +120,19 @@ netstat -tlnp | grep LISTEN
 ```bash
 # SSH Service Analysis
 systemctl show ssh.service
+
+grep ssh /var/log/auth.log
+sudo tail -n 20 /var/log/auth.log | grep -i ssh
 journalctl -u ssh.service --since "1 hour ago"
 
+
 # Web Services
-systemctl status apache2
-systemctl status nginx
+#systemctl status apache2
+#systemctl status nginx
 
 # Database Services
-systemctl status mysql
-systemctl status postgresql
+#systemctl status mysql
+#systemctl status postgresql
 ```
 
 ### Practical Lab 2.2: Service Configuration Analysis
@@ -141,7 +146,6 @@ ls /etc/systemd/system/
 
 # View service configuration
 cat /lib/systemd/system/ssh.service
-cat /etc/systemd/system/apache2.service.d/*.conf
 ```
 
 #### Creating Custom Monitoring Service:
@@ -173,7 +177,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/monitor-auth.sh
+EExecStart=/bin/bash /usr/local/bin/monitor-auth.sh
 Restart=on-failure
 User=root
 
@@ -208,7 +212,7 @@ sudo systemctl start auth-monitor.service
 
 **Syslog Components:**
 
-1. **Syslog Daemon**: rsyslog, syslog-ng, journald
+1. **Syslog Daemon**: rsyslog, syslog-ng
 2. **Log Files**: Structured storage locations
 3. **Log Rotation**: logrotate utility
 4. **Remote Logging**: Centralized log collection
@@ -216,7 +220,7 @@ sudo systemctl start auth-monitor.service
 **Syslog Message Format (RFC 5424):**
 
 ```
-<Priority>Version Timestamp Hostname Application PID MessageID StructuredData Message
+<Priority>Version SP-Timestamp Hostname ApplicationName ProcessID MessageID StructuredData MSG
 ```
 
 **Priority Calculation:**
@@ -254,8 +258,8 @@ Priority = Facility × 8 + Severity
 sudo nano /etc/rsyslog.conf
 
 # Add custom rules
-echo "auth,authpriv.*    /var/log/custom-auth.log" | sudo tee -a /etc/rsyslog.conf
-echo "daemon.*           /var/log/daemon-custom.log" | sudo tee -a /etc/rsyslog.conf
+echo "auth,authpriv.*    /var/log/auth.log" | sudo tee -a /etc/rsyslog.conf
+#echo "daemon.*           /var/log/daemon.log" | sudo tee -a /etc/rsyslog.conf
 
 # Restart rsyslog
 sudo systemctl restart rsyslog
@@ -277,7 +281,6 @@ sudo systemctl restart rsyslog
 
 ```bash
 # Real-time monitoring
-sudo tail -f /var/log/syslog
 sudo tail -f /var/log/auth.log
 
 # Search and filter
@@ -308,29 +311,148 @@ sudo ls                 # Sudo usage
 #### Parse Syslog Messages:
 
 ```bash
-# Python script for syslog parsing
-cat > /tmp/parse_syslog.py << 'EOF'
+sudo tee /tmp/parse_syslog.py <<'PY'
 #!/usr/bin/env python3
+"""
+Robust syslog parser (improved, includes parse_line).
+Usage: python3 /tmp/parse_syslog.py /var/log/auth.log --json
+       python3 /tmp/parse_syslog.py -    # read from stdin
+"""
+from __future__ import annotations
 import re
 import sys
+import argparse
+import logging
+import json
+from datetime import datetime
+from typing import Optional, Dict, Iterator, TextIO
 
-# Syslog regex pattern
-pattern = r'(\w+\s+\d+\s+\d+:\d+:\d+)\s+(\w+)\s+(\w+)(?:\[(\d+)\])?\s*:\s*(.*)'
+LOG = logging.getLogger("parse_syslog")
 
-with open(sys.argv[1], 'r') as f:
+SYSLOG_RE = re.compile(
+    r"""
+    ^(?:<\d+>\s*)?                                      # optional PRI like <34>
+    \s*
+    (?P<time>[A-Za-z]{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})?  # e.g. "Aug 12 12:34:56" (optional)
+    \s*
+    (?P<host>[^\s:]+)?                                  # hostname (allows - . etc.)
+    \s*
+    (?P<proc>[^\s\[]+)?                                 # process name (no '[')
+    (?:\[(?P<pid>\d+)\])?                               # optional [PID]
+    \s*:\s*
+    (?P<msg>.*)                                         # rest of message
+    $""",
+    re.VERBOSE,
+)
+
+
+def parse_timestamp(ts_str: str, year: Optional[int] = None) -> Optional[datetime]:
+    if not ts_str:
+        return None
+    if year is None:
+        year = datetime.now().year
+    for fmt in ("%b %d %H:%M:%S", "%b %e %H:%M:%S"):
+        try:
+            dt = datetime.strptime(ts_str, fmt)
+            return dt.replace(year=year)
+        except ValueError:
+            continue
+    try:
+        cleaned = " ".join(ts_str.split())
+        return datetime.strptime(cleaned, "%b %d %H:%M:%S").replace(year=year)
+    except Exception:
+        LOG.debug("Failed to parse timestamp %r", ts_str, exc_info=True)
+        return None
+
+
+def parse_line(line: str, parse_time: bool = True, year: Optional[int] = None) -> Optional[Dict]:
+    """
+    Parse a single syslog-style line into a dict; return None if nothing matches usefully.
+    """
+    m = SYSLOG_RE.match(line.rstrip("\n"))
+    if not m:
+        return None
+    gd = m.groupdict()
+    ts_str = gd.get("time")
+    parsed_ts = parse_timestamp(ts_str, year=year) if (parse_time and ts_str) else None
+    pid = gd.get("pid")
+    return {
+        "timestamp": parsed_ts.isoformat() if parsed_ts else None,
+        "timestamp_raw": ts_str,
+        "host": gd.get("host"),
+        "process": gd.get("proc"),
+        "pid": int(pid) if pid is not None else None,
+        "message": gd.get("msg", ""),
+    }
+
+
+def iter_file_lines(f: TextIO) -> Iterator[str]:
     for line in f:
-        match = re.match(pattern, line.strip())
-        if match:
-            timestamp, hostname, process, pid, message = match.groups()
-            print(f"Time: {timestamp}")
-            print(f"Host: {hostname}")
-            print(f"Process: {process}")
-            print(f"PID: {pid}")
-            print(f"Message: {message}")
-            print("-" * 40)
-EOF
+        yield line
 
-python3 /tmp/parse_syslog.py /var/log/auth.log | head -20
+
+def process_stream(stream: TextIO, args) -> Iterator[Dict]:
+    for line in iter_file_lines(stream):
+        parsed = parse_line(line, parse_time=not args.no_time, year=args.year)
+        if not parsed:
+            continue
+        if args.process and parsed["process"] != args.process:
+            continue
+        yield parsed
+
+
+def open_input(path: str):
+    if path == "-" or path is None:
+        return sys.stdin
+    return open(path, "r", encoding="utf-8", errors="replace")
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Parse syslog-style lines and print structured output.")
+    parser.add_argument("path", nargs="?", default="-", help="Path to log file, or '-' for stdin (default).")
+    parser.add_argument("--json", action="store_true", help="Output one JSON object per matched line.")
+    parser.add_argument("--no-time", action="store_true", help="Don't attempt to parse timestamps to datetime.")
+    parser.add_argument("--year", type=int, help="Year to use when parsing timestamps (defaults to current year).")
+    parser.add_argument("--process", help="Only show lines from this process name (exact match).")
+    parser.add_argument("-v", "--verbose", action="count", default=0, help="Increase verbosity (repeat).")
+    args = parser.parse_args(argv)
+
+    level = logging.WARNING
+    if args.verbose == 1:
+        level = logging.INFO
+    elif args.verbose >= 2:
+        level = logging.DEBUG
+    logging.basicConfig(level=level, format="%(levelname)s: %(message)s")
+
+    try:
+        with open_input(args.path) as fh:
+            for obj in process_stream(fh, args):
+                if args.json:
+                    print(json.dumps(obj, ensure_ascii=False, default=str))
+                else:
+                    print(f"Time:    {obj['timestamp'] or obj['timestamp_raw']}")
+                    print(f"Host:    {obj['host']}")
+                    print(f"Process: {obj['process']}")
+                    print(f"PID:     {obj['pid'] or '-'}")
+                    print(f"Message: {obj['message']}")
+                    print("-" * 40)
+    except FileNotFoundError:
+        LOG.error("File not found: %s", args.path)
+        return 2
+    except PermissionError:
+        LOG.error("Permission denied reading: %s (try sudo?)", args.path)
+        return 3
+    except BrokenPipeError:
+        return 0
+    except Exception:
+        LOG.exception("Unexpected error")
+        return 1
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
 ```
 
 ### Assessment Checkpoint 3
@@ -341,7 +463,7 @@ python3 /tmp/parse_syslog.py /var/log/auth.log | head -20
 
 ---
 
-## Session 4: ELK Stack Implementation
+## 4: ELK Stack Implementation
 
 ### Learning Objectives
 
@@ -391,12 +513,17 @@ sudo nano /etc/elasticsearch/elasticsearch.yml
 **Elasticsearch Configuration:**
 
 ```yaml
-cluster.name: security-lab-cluster
-node.name: ubuntu-node-1
-network.host: 192.168.100.20
+network.host: localhost
 http.port: 9200
-discovery.type: single-node
 xpack.security.enabled: false
+```
+
+```bash
+chmod +x /tmp/parse_syslog.py
+```
+
+```bash
+sudo python3 -u /tmp/parse_syslog.py /var/log/auth.log --json -v | head -n 20
 ```
 
 ```bash
@@ -405,7 +532,7 @@ sudo systemctl enable elasticsearch
 sudo systemctl start elasticsearch
 
 # Verify installation
-curl -X GET "192.168.100.20:9200/"
+curl -X GET "localhost:9200/"
 ```
 
 #### Install Logstash:
@@ -453,7 +580,7 @@ filter {
 
 output {
   elasticsearch {
-    hosts => ["192.168.100.20:9200"]
+    hosts => ["localhost:9200"]
     index => "security-logs-%{+YYYY.MM.dd}"
   }
 }
@@ -478,8 +605,8 @@ sudo nano /etc/kibana/kibana.yml
 
 ```yaml
 server.port: 5601
-server.host: "192.168.100.20"
-elasticsearch.hosts: ["http://192.168.100.20:9200"]
+server.host: "localhost"
+elasticsearch.hosts: ["http://localhost:9200"]
 ```
 
 ```bash
@@ -488,14 +615,14 @@ sudo systemctl enable kibana
 sudo systemctl start kibana
 
 # Access Kibana
-# Open browser: http://192.168.100.20:5601
+# Open browser: http://localhost:5601
 ```
 
 ### Practical Lab 4.2: Creating Security Dashboards
 
 #### Access Kibana and Create Index Patterns:
 
-1. Navigate to Stack Management → Index Patterns
+1. Navigate to Stack Management → kibana → Data View
 2. Create pattern: `security-logs-*`
 3. Set time field: `@timestamp`
 
@@ -526,7 +653,7 @@ sudo systemctl start kibana
 
 ---
 
-## Session 5: Defensive Analysis & Suspicious Activity Detection
+## 5: Defensive Analysis & Suspicious Activity Detection
 
 ### Learning Objectives
 
@@ -556,7 +683,10 @@ sudo systemctl start kibana
 
 ```bash
 # Brute force detection
-cat > /usr/local/bin/detect-bruteforce.sh << 'EOF'
+sudo tee /usr/local/bin/detect-bruteforce.sh << 'EOF'
+```
+
+```bash
 #!/bin/bash
 LOGFILE="/var/log/auth.log"
 THRESHOLD=5
@@ -581,13 +711,15 @@ done | sort | uniq -c | while read count ip; do
     fi
 done
 EOF
+```
 
+```bash
 chmod +x /usr/local/bin/detect-bruteforce.sh
 ```
 
 ```bash
 # Privilege escalation detection
-cat > /usr/local/bin/detect-privesc.sh << 'EOF'
+sudo tee /usr/local/bin/detect-privesc.sh << 'EOF'
 #!/bin/bash
 LOGFILE="/var/log/auth.log"
 
@@ -604,14 +736,19 @@ grep "sudo" $LOGFILE | tail -50 | while read line; do
     fi
 done
 EOF
+```
 
+```bash
 chmod +x /usr/local/bin/detect-privesc.sh
 ```
 
 #### Create Monitoring Dashboard Script:
 
 ```bash
-cat > /usr/local/bin/security-monitor.sh << 'EOF'
+sudo tee /usr/local/bin/security-monitor.sh << 'EOF'
+```
+
+```bash
 #!/bin/bash
 
 echo "=== Security Monitoring Dashboard ==="
@@ -639,7 +776,9 @@ echo
 echo "=== Network Connections ==="
 ss -tuln | grep LISTEN | head -10
 EOF
+```
 
+```bash
 chmod +x /usr/local/bin/security-monitor.sh
 ```
 
@@ -726,7 +865,7 @@ message:"Started" OR message:"Stopped" OR message:"Failed"
 
 ---
 
-## Session 6: Privilege Escalation Detection
+## 6: Privilege Escalation Detection
 
 ### Learning Objectives
 
@@ -764,8 +903,13 @@ message:"Started" OR message:"Stopped" OR message:"Failed"
 # Download LinPEAS
 cd /tmp
 wget https://github.com/carlospolop/PEASS-ng/releases/latest/download/linpeas.sh
-chmod +x linpeas.sh
+```
 
+```bash
+chmod +x linpeas.sh
+```
+
+```bash
 # Transfer to Ubuntu victim
 scp linpeas.sh user@192.168.100.20:/tmp/
 ```
@@ -835,7 +979,9 @@ getcap -r / 2>/dev/null | head -10
 
 echo -e "\n=== Detection Complete ==="
 EOF
+```
 
+```bash
 chmod +x /usr/local/bin/privesc-detector.sh
 ```
 
@@ -879,6 +1025,9 @@ tail -f $LOGFILE | while read line; do
 done
 EOF
 
+```
+
+```bash
 chmod +x /usr/local/bin/monitor-privesc.sh
 ```
 
