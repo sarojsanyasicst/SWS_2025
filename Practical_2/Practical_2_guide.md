@@ -7,7 +7,7 @@
 - Host OS: [Your Default Installed OS]
 - Attacker Machine: Kali Linux 2025.2 (amd64)
 - Victim Machine: Ubuntu Desktop 24.04.3 (amd64)
-- Log Analysis: ELK Stack (Elasticsearch, Logstash, Kibana)
+- Log Analysis: Scripts (Bash & Python)
 
 ---
 
@@ -41,10 +41,10 @@ Use **Internal Network** configuration to prevent:
 
 1. **Configure Kali Linux VM:**
 
-   - Settings → Network → Adapter 1 → NAT
+   - Settings → Network → Adapter 1 → NAT/Bridged(when required)
 
 2. **Configure Ubuntu VM:**
-   - Settings → Network → Adapter 1 → NAT
+   - Settings → Network → Adapter 1 → NAT/Bridged(when required)
 
 #### Step 2: Verify Connectivity
 
@@ -200,7 +200,7 @@ sudo systemctl start auth-monitor.service
 
 ---
 
-## Session 3: Syslog Framework & Components
+## 3: Syslog Framework & Components
 
 ### Learning Objectives
 
@@ -213,7 +213,7 @@ sudo systemctl start auth-monitor.service
 **Syslog Components:**
 
 1. **Syslog Daemon**: rsyslog, syslog-ng
-2. **Log Files**: Structured storage locations
+2. **Log Files**: Structured storage locations (eg.: /var/log)
 3. **Log Rotation**: logrotate utility
 4. **Remote Logging**: Centralized log collection
 
@@ -305,13 +305,16 @@ journalctl -p err               # Priority filtering
 ```bash
 # Generate authentication events
 ssh wronguser@localhost  # Failed login
-sudo ls                 # Sudo usage
+sudo ls                  # Sudo usage
 ```
 
 #### Parse Syslog Messages:
 
 ```bash
-sudo tee /tmp/parse_syslog.py <<'PY'
+sudo nano /tmp/parse_syslog.py
+```
+
+```bash
 #!/usr/bin/env python3
 """
 Robust syslog parser (improved, includes parse_line).
@@ -463,197 +466,7 @@ if __name__ == "__main__":
 
 ---
 
-## 4: ELK Stack Implementation
-
-### Learning Objectives
-
-- Deploy ELK Stack for centralized logging
-- Configure log ingestion pipelines
-- Create basic security dashboards
-
-### Theory: ELK Stack Architecture
-
-**Components:**
-
-- **Elasticsearch**: Distributed search and analytics engine
-- **Logstash**: Data processing pipeline
-- **Kibana**: Data visualization and exploration
-- **Beats** (Optional): Lightweight data shippers
-
-**Data Flow:**
-
-```
-Log Sources → Logstash → Elasticsearch → Kibana
-```
-
-### Practical Lab 4.1: ELK Stack Installation (Ubuntu)
-
-#### Install Java (Required for Elasticsearch):
-
-```bash
-sudo apt update
-sudo apt install openjdk-11-jdk
-java -version
-```
-
-#### Install Elasticsearch:
-
-```bash
-# Add Elastic repository
-wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch | sudo apt-key add -
-echo "deb https://artifacts.elastic.co/packages/8.x/apt stable main" | sudo tee /etc/apt/sources.list.d/elastic-8.x.list
-
-sudo apt update
-sudo apt install elasticsearch
-
-# Configure Elasticsearch
-sudo nano /etc/elasticsearch/elasticsearch.yml
-```
-
-**Elasticsearch Configuration:**
-
-```yaml
-network.host: localhost
-http.port: 9200
-xpack.security.enabled: false
-```
-
-```bash
-chmod +x /tmp/parse_syslog.py
-```
-
-```bash
-sudo python3 -u /tmp/parse_syslog.py /var/log/auth.log --json -v | head -n 20
-```
-
-```bash
-# Start Elasticsearch
-sudo systemctl enable elasticsearch
-sudo systemctl start elasticsearch
-
-# Verify installation
-curl -X GET "localhost:9200/"
-```
-
-#### Install Logstash:
-
-```bash
-sudo apt install logstash
-
-# Create Logstash configuration
-sudo nano /etc/logstash/conf.d/syslog.conf
-```
-
-**Logstash Configuration:**
-
-```ruby
-input {
-  file {
-    path => "/var/log/auth.log"
-    start_position => "beginning"
-    type => "auth"
-  }
-  file {
-    path => "/var/log/syslog"
-    start_position => "beginning"
-    type => "syslog"
-  }
-}
-
-filter {
-  if [type] == "auth" {
-    grok {
-      match => { "message" => "%{SYSLOGTIMESTAMP:timestamp} %{HOSTNAME:hostname} %{WORD:program}(?:\[%{POSINT:pid}\])?: %{GREEDYDATA:message}" }
-    }
-  }
-
-  if [type] == "syslog" {
-    grok {
-      match => { "message" => "%{SYSLOGLINE}" }
-    }
-  }
-
-  date {
-    match => [ "timestamp", "MMM  d HH:mm:ss", "MMM dd HH:mm:ss" ]
-  }
-}
-
-output {
-  elasticsearch {
-    hosts => ["localhost:9200"]
-    index => "security-logs-%{+YYYY.MM.dd}"
-  }
-}
-```
-
-```bash
-# Start Logstash
-sudo systemctl enable logstash
-sudo systemctl start logstash
-```
-
-#### Install Kibana:
-
-```bash
-sudo apt install kibana
-
-# Configure Kibana
-sudo nano /etc/kibana/kibana.yml
-```
-
-**Kibana Configuration:**
-
-```yaml
-server.port: 5601
-server.host: "localhost"
-elasticsearch.hosts: ["http://localhost:9200"]
-```
-
-```bash
-# Start Kibana
-sudo systemctl enable kibana
-sudo systemctl start kibana
-
-# Access Kibana
-# Open browser: http://localhost:5601
-```
-
-### Practical Lab 4.2: Creating Security Dashboards
-
-#### Access Kibana and Create Index Patterns:
-
-1. Navigate to Stack Management → kibana → Data View
-2. Create pattern: `security-logs-*`
-3. Set time field: `@timestamp`
-
-#### Create Visualizations:
-
-1. **Failed Login Attempts Over Time**
-
-   - Visualization: Line Chart
-   - Metric: Count
-   - Filter: `message: "Failed password"`
-
-2. **Top Failed Login IPs**
-
-   - Visualization: Data Table
-   - Terms: Extract IP from message field
-   - Metric: Count
-
-3. **Service Activity Breakdown**
-   - Visualization: Pie Chart
-   - Terms: `program.keyword`
-   - Metric: Count
-
-### Assessment Checkpoint 4
-
-- [ ] ELK Stack fully operational
-- [ ] Logs ingested into Elasticsearch
-- [ ] Basic security dashboard created
-
----
-
-## 5: Defensive Analysis & Suspicious Activity Detection
+## 4: Defensive Analysis & Suspicious Activity Detection
 
 ### Learning Objectives
 
@@ -677,13 +490,13 @@ sudo systemctl start kibana
 - **Anomaly-based**: Deviation from baseline
 - **Behavioral**: User/system behavior analysis
 
-### Practical Lab 5.1: Automated Threat Detection Scripts
+### Practical Lab 4.1: Automated Threat Detection Scripts
 
 #### Create Detection Scripts:
 
 ```bash
 # Brute force detection
-sudo tee /usr/local/bin/detect-bruteforce.sh << 'EOF'
+sudo nano /usr/local/bin/detect-bruteforce.sh
 ```
 
 ```bash
@@ -710,7 +523,6 @@ done | sort | uniq -c | while read count ip; do
         # iptables -A INPUT -s $ip -j DROP
     fi
 done
-EOF
 ```
 
 ```bash
@@ -719,7 +531,10 @@ chmod +x /usr/local/bin/detect-bruteforce.sh
 
 ```bash
 # Privilege escalation detection
-sudo tee /usr/local/bin/detect-privesc.sh << 'EOF'
+sudo nano /usr/local/bin/detect-privesc.sh
+```
+
+```bash
 #!/bin/bash
 LOGFILE="/var/log/auth.log"
 
@@ -735,7 +550,6 @@ grep "sudo" $LOGFILE | tail -50 | while read line; do
         fi
     fi
 done
-EOF
 ```
 
 ```bash
@@ -782,90 +596,14 @@ EOF
 chmod +x /usr/local/bin/security-monitor.sh
 ```
 
-### Practical Lab 5.2: Kibana Advanced Queries and Alerts
-
-#### Kibana Query Examples:
-
-```
-# Failed SSH attempts
-type:auth AND message:"Failed password"
-
-# Successful logins after failures
-type:auth AND message:"Accepted password"
-
-# Root login attempts
-type:auth AND message:"root" AND message:"ssh"
-
-# Service status changes
-message:"Started" OR message:"Stopped" OR message:"Failed"
-```
-
-#### Create Kibana Watchers (Alerts):
-
-1. Navigate to Stack Management → Watcher
-2. Create new watcher for failed login detection:
-
-```json
-{
-  "trigger": {
-    "schedule": {
-      "interval": "1m"
-    }
-  },
-  "input": {
-    "search": {
-      "request": {
-        "search_type": "query_then_fetch",
-        "indices": ["security-logs-*"],
-        "body": {
-          "query": {
-            "bool": {
-              "must": [
-                {
-                  "match": {
-                    "message": "Failed password"
-                  }
-                },
-                {
-                  "range": {
-                    "@timestamp": {
-                      "gte": "now-5m"
-                    }
-                  }
-                }
-              ]
-            }
-          }
-        }
-      }
-    }
-  },
-  "condition": {
-    "compare": {
-      "ctx.payload.hits.total": {
-        "gt": 10
-      }
-    }
-  },
-  "actions": {
-    "log_alert": {
-      "logging": {
-        "text": "High number of failed login attempts detected: {{ctx.payload.hits.total}}"
-      }
-    }
-  }
-}
-```
-
-### Assessment Checkpoint 5
+### Assessment Checkpoint 4
 
 - [ ] Automated threat detection scripts functional
-- [ ] Kibana queries for security analysis
 - [ ] Alert mechanisms configured
 
 ---
 
-## 6: Privilege Escalation Detection
+## 5: Privilege Escalation Detection
 
 ### Learning Objectives
 
@@ -895,7 +633,7 @@ message:"Started" OR message:"Stopped" OR message:"Failed"
 - Service misconfigurations
 - Environment variable manipulation
 
-### Practical Lab 6.1: LinPEAS Implementation
+### Practical Lab 5.1: LinPEAS Implementation
 
 #### Install LinPEAS on Kali Linux:
 
@@ -911,7 +649,7 @@ chmod +x linpeas.sh
 
 ```bash
 # Transfer to Ubuntu victim
-scp linpeas.sh user@192.168.100.20:/tmp/
+scp linpeas.sh user@[victim_ip]:/tmp/
 ```
 
 #### Run LinPEAS on Ubuntu:
@@ -931,12 +669,15 @@ cd /tmp
 # - Network information
 ```
 
-### Practical Lab 6.2: Custom Privilege Escalation Detection
+### Practical Lab 5.2: Custom Privilege Escalation Detection
 
 #### Create Detection Script:
 
 ```bash
-cat > /usr/local/bin/privesc-detector.sh << 'EOF'
+sudo nano /usr/local/bin/privesc-detector.sh
+```
+
+```bash
 #!/bin/bash
 
 echo "=== Privilege Escalation Detection Report ==="
@@ -985,7 +726,7 @@ EOF
 chmod +x /usr/local/bin/privesc-detector.sh
 ```
 
-### Practical Lab 6.3: Log-Based Privilege Escalation Detection
+### Practical Lab 5.3: Log-Based Privilege Escalation Detection
 
 #### Monitor Privilege Escalation Events:
 
@@ -1023,34 +764,20 @@ tail -f $LOGFILE | while read line; do
         echo "[PRIVESC] Password change detected: $line"
     fi
 done
-EOF
-
 ```
 
 ```bash
 chmod +x /usr/local/bin/monitor-privesc.sh
 ```
 
-#### Create Kibana Dashboard for Privilege Escalation:
-
-1. **Privilege Escalation Events Visualization:**
-
-   - Query: `message:(su OR sudo OR useradd OR usermod OR passwd)`
-   - Visualization: Timeline
-
-2. **SUID Binary Execution Detection:**
-   - Monitor process execution logs
-   - Filter for SUID binary paths
-
-### Assessment Checkpoint 6
+### Assessment Checkpoint 5
 
 - [ ] LinPEAS successfully executed
 - [ ] Custom privilege escalation detection scripts working
-- [ ] Kibana dashboard for privilege escalation monitoring
 
 ---
 
-## Session 7: Log Footprint Detection & Final Assessment
+## 6: Log Footprint Detection & Final Assessment
 
 ### Learning Objectives
 
@@ -1075,13 +802,16 @@ chmod +x /usr/local/bin/monitor-privesc.sh
 - Log backup and retention
 - File system monitoring
 
-### Practical Lab 7.1: Advanced Log Analysis
+### Practical Lab 6.1: Advanced Log Analysis
 
 #### Detect Log Tampering:
 
 ```bash
 # Create log integrity checker
-cat > /usr/local/bin/log-integrity.sh << 'EOF'
+sudo nano /usr/local/bin/log-integrity.sh
+```
+
+```bash
 #!/bin/bash
 
 LOG_DIR="/var/log"
@@ -1111,8 +841,9 @@ check_integrity() {
 }
 
 check_integrity
-EOF
+```
 
+```bash
 chmod +x /usr/local/bin/log-integrity.sh
 ```
 
@@ -1120,7 +851,10 @@ chmod +x /usr/local/bin/log-integrity.sh
 
 ```bash
 # Create comprehensive attack detection
-cat > /usr/local/bin/attack-patterns.sh << 'EOF'
+sudo nano /usr/local/bin/attack-patterns.sh
+```
+
+```bash
 #!/bin/bash
 
 LOGFILE="/var/log/auth.log"
@@ -1169,8 +903,9 @@ for hour in $(seq 0 $current_hour); do
         echo "[SUSPICIOUS] No logs for hour $hour_formatted - possible log deletion"
     fi
 done
-EOF
+```
 
+```bash
 chmod +x /usr/local/bin/attack-patterns.sh
 ```
 
@@ -1214,7 +949,10 @@ cp /var/log/syslog attack_syslog.log
 **4. Comparison Analysis Script:**
 
 ```bash
-cat > /usr/local/bin/compare-logs.sh << 'EOF'
+sudo nano /usr/local/bin/compare-logs.sh
+```
+
+```bash
 #!/bin/bash
 
 echo "=== Linux Services and Syslogs Comparison Report ==="
@@ -1253,8 +991,9 @@ echo "This analysis would compare listening ports before and after attacks"
 
 echo -e "\n=== Conclusion ==="
 echo "Analysis complete. Review above sections for security implications."
-EOF
+```
 
+```bash
 chmod +x /usr/local/bin/compare-logs.sh
 ```
 
