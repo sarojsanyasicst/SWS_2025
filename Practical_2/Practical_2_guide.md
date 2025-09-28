@@ -732,7 +732,10 @@ chmod +x /usr/local/bin/privesc-detector.sh
 
 ```bash
 # Create monitoring script for privilege changes
-cat > /usr/local/bin/monitor-privesc.sh << 'EOF'
+sudo nano /usr/local/bin/monitor-privesc.sh
+```
+
+```bash
 #!/bin/bash
 
 LOGFILE="/var/log/auth.log"
